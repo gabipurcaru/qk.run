@@ -56,9 +56,10 @@
             const save = useCallback(async () => {
                 setState("saving");
                 const yaml = editor.getValue();
+
                 const response = await fetch("/save", {
                     method: "POST",
-                    body: yaml,
+                    body: JSON.stringify({ value: yaml }),
                     headers: { 'Content-Type': 'application/json' },
                 });
                 const hash = await response.text();

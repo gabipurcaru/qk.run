@@ -12,12 +12,14 @@ extern crate yaml_rust;
 use maplit::hashmap;
 use regex::Regex;
 use rocket::http::uri::Uri;
+use rocket::request::Form;
 use rocket::response::{NamedFile, Redirect};
+use rocket_contrib::json::Json;
 use rocket_contrib::serve::StaticFiles;
 use rocket_contrib::templates::Template;
 use rusoto_core::Region;
 use rusoto_dynamodb::{AttributeValue, DynamoDb, DynamoDbClient, GetItemInput, PutItemInput};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::default::Default;
 use tokio::runtime::Runtime;
@@ -177,7 +179,6 @@ fn parse_yaml(yaml_string: String) -> RuleSet {
         }
     });
 
-    println!("{:?}", rules);
     rules
 }
 
@@ -222,7 +223,6 @@ async fn query(hash_string: String, q: String) -> Redirect {
     }
 
     // find matching rule
-    println!("word: {}; query: {}", word, query);
     let rule_matched = rules.rules.iter().find(|rule| rule.prefix == word);
     let rule = rule_matched.map_or(&rules.default, |r| &r);
 
@@ -234,13 +234,7 @@ async fn query(hash_string: String, q: String) -> Redirect {
 
     if rule.prefix != "default" {
         q_replace = &encoded_query;
-        println!("default rules don't apply");
     }
-
-    println!(
-        "rule: {:?};     q: {} hash: {} zero: {}  one: {};    rule: {}",
-        rule, &q, &hash_string, &zero, &one, rule.query,
-    );
 
     // apply rule
     Redirect::to(
@@ -257,24 +251,28 @@ async fn favicon() -> Option<NamedFile> {
     NamedFile::open("assets/favicon.ico").await.ok()
 }
 
-#[post("/save", data = "<yaml>")]
-async fn save(yaml: String) -> String {
+#[derive(Deserialize)]
+struct SaveInput {
+    value: String,
+}
+
+#[post("/save", format = "application/json", data = "<yaml>")]
+async fn save(yaml: Json<SaveInput>) -> String {
     // validate the yaml
-    YamlLoader::load_from_str(&yaml).unwrap();
+    YamlLoader::load_from_str(&yaml.value).unwrap();
     let client = DynamoDbClient::new(Region::EuWest2);
-    let hash = format!("{:x}", md5::compute(&yaml));
+    let hash = format!("{:x}", md5::compute(&yaml.value));
     let res = client
             .put_item(PutItemInput {
                 table_name: "qkrun".to_string(),
                 condition_expression: Some("attribute_not_exists(config_hash)".to_string()),
                 item: hashmap! {
                     "config_hash".to_string() => AttributeValue {s: Some(hash.clone()) , ..Default::default() },
-                    "config".to_string() => AttributeValue { s: Some(yaml.clone()), ..Default::default()  },
+                    "config".to_string() => AttributeValue { s: Some(yaml.value.clone()), ..Default::default()  },
                 },
                 ..Default::default()
             })
             .await;
-    println!("Got: {:?}", res);
     hash
 }
 
