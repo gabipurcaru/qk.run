@@ -1,0 +1,111 @@
+{{>header}}
+<link rel="stylesheet" data-name="vs/editor/editor.main"
+    href="/assets/npm/node_modules/monaco-editor/min/vs/editor/editor.main.css" />
+
+<header class="post-header">
+    <h1 class="post-title"><a href="{{ meta.url }}">qk.run</a> - Search bar Superpowers</h1>
+</header>
+<div itemprop="articleBody" class="post-body">
+    <div id="editor" style="width: 800px; height: 600px"></div>
+
+    <div id="save-button"></div>
+
+    {{!-- editor includes --}}
+    <script>
+        var require = { paths: { vs: '/assets/npm/node_modules/monaco-editor/min/vs' } };
+    </script>
+    <script src="/assets/npm/node_modules/monaco-editor/min/vs/loader.js"></script>
+    <script src="/assets/npm/node_modules/monaco-editor/min/vs/editor/editor.main.nls.js"></script>
+    <script src="/assets/npm/node_modules/monaco-editor/min/vs/editor/editor.main.js"></script>
+
+    <script type="module">
+        import { h, Component, render } from 'https://unpkg.com/preact@latest?module';
+        import { useState, useCallback } from 'https://unpkg.com/preact@latest/hooks/dist/hooks.module.js?module';
+        import htm from 'https://unpkg.com/htm?module';
+
+        function htmlDecode(input) {
+            var doc = new DOMParser().parseFromString(input, "text/html");
+            return doc.documentElement.textContent;
+        }
+
+        const code = htmlDecode(`{{ yaml }}`);
+        const editor = monaco.editor.create(document.getElementById('editor'), {
+            value: code,
+            language: 'yaml',
+            minimap: {
+                enabled: false
+            },
+            theme: 'vs-dark',
+        });
+        editor.focus();
+
+        if (document.location.pathname === "/") {
+            editor.setSelection({
+                startLineNumber: 6,
+                endLineNumber: 6,
+                startColumn: 0,
+                endColumn: 999,
+            });
+        }
+
+        // Initialize htm with Preact
+        const html = htm.bind(h);
+
+        function useSave() {
+            const [state, setState] = useState("default");
+            const save = useCallback(async () => {
+                setState("saving");
+                const yaml = editor.getValue();
+                const response = await fetch("/save", {
+                    method: "POST",
+                    body: yaml,
+                    headers: { 'Content-Type': 'application/json' },
+                });
+                const hash = await response.text();
+                history.pushState('', '', `/${hash}`);
+
+                navigator.permissions.query({ name: "clipboard-write" }).then(result => {
+                    if (result.state == "granted" || result.state == "prompt") {
+                        navigator.clipboard.writeText(`https://qk.run/q/${hash}/?q=%s`)
+                    }
+                });
+
+                setState("saved");
+                setTimeout(() => {
+                    setState("default");
+                }, 4000);
+            }, [state]);
+
+            return [state, save];
+        }
+
+        function SaveButton(props) {
+            const [state, save] = useSave();
+
+            let icon = html`<i class="fa fa-copy"></i>`;
+
+            if (state === "saving") {
+                icon = html`<i class="fa fa-spinner fa-spin"></i>`;
+            } else if (state === "saved") {
+                icon = html`<i class="fa fa-check-circle"></i>`;
+            }
+
+            let text = "Save & Copy Search Engine URL";
+
+            if (state === "saved") {
+                text = "Copied!";
+            }
+
+            return html`
+    <button class="btn btn-primary" style="margin-top: 20px; margin-bottom: 20px" onClick=${save}>
+        ${icon} ${text}
+    </button>`;
+        }
+
+        render(html`
+    <${SaveButton} />`, document.getElementById('save-button'));
+    </script>
+</div>
+
+
+{{>footer}}

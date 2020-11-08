@@ -1,0 +1,10 @@
+[global]
+templates_dir = "templates/"
+assets_dir = "assets/"
+
+[production]
+address = "0.0.0.0"
+port = 8000
+keep_alive = 5
+log = "critical"
+secret_key = "lESyy8r8oVYfoIPLLzEnSJsjeWtCqgSOwjSiLqgsUj4="
