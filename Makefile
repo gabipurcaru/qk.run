@@ -1,7 +1,4 @@
-build:
-	cd assets/npm && npm i
-	cargo build --release
-	cp target/release/qk_run .
-	# rm target
+deploy:
+	bash build_and_deploy.sh
 run:
-	./qk_run
+	cargo run

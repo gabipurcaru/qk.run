@@ -1,0 +1,9 @@
+
+#!/usr/bin/env bash
+
+echo "package hook called"
+
+pushd /code
+zip -r "$OLDPWD/$1.zip" ./templates/ -1 -u 
+zip -r "$OLDPWD/$1.zip" ./assets/ -1 -u 
+popd

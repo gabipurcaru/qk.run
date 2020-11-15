@@ -6,17 +6,20 @@ extern crate rocket;
 #[macro_use]
 extern crate lazy_static;
 
+extern crate rusoto_core;
+extern crate rusoto_dynamodb;
 extern crate tokio;
 extern crate yaml_rust;
 
 use maplit::hashmap;
 use regex::Regex;
 use rocket::http::uri::Uri;
-use rocket::request::Form;
 use rocket::response::{NamedFile, Redirect};
+use rocket::Rocket;
 use rocket_contrib::json::Json;
 use rocket_contrib::serve::StaticFiles;
 use rocket_contrib::templates::Template;
+use rocket_lamb::RocketExt;
 use rusoto_core::Region;
 use rusoto_dynamodb::{AttributeValue, DynamoDb, DynamoDbClient, GetItemInput, PutItemInput};
 use serde::{Deserialize, Serialize};
@@ -31,7 +34,7 @@ const DEFAULT_YAML: &str = r#"# parameters you can use (see examples below):
 # %0, %1, %2 - the first, second or third parameter
 # %hash - the hash of the search config
 
-# This is an editor - feel free to change and click save below!
+# This is an interactive editor - feel free to change and click save below!
 
 # Default search engine - fallback to all queries
 default: https://www.google.com/search?q=%q
@@ -47,9 +50,9 @@ d: https://duckduckgo.com/?q=%q
 cal: https://calendar.google.com/calendar
 
 # AWS
-aws: https://console.aws.amazon.com/console/home
-aws %0: https://console.aws.amazon.com/%0/home
+aws: https://console.aws.amazon.com/%q/home
 s3: https://s3.console.aws.amazon.com/s3/buckets/%q
+ec2: https://console.aws.amazon.com/ec2/%q
 athena: https://console.aws.amazon.com/athena/home"#;
 
 lazy_static! {
@@ -97,7 +100,7 @@ fn render_page(yaml: String) -> Template {
     Template::render("index", &default_context(yaml))
 }
 
-async fn read_yaml(hash_string: String) -> String {
+fn read_yaml(hash_string: String) -> String {
     let res = DYNAMO_CLIENT
             .get_item(GetItemInput {
                 table_name: "qkrun".to_string(),
@@ -105,9 +108,8 @@ async fn read_yaml(hash_string: String) -> String {
                     "config_hash".to_string() => AttributeValue {s: Some(hash_string.clone()), ..Default::default()},
                 },
                 ..Default::default()
-            })
-            .await;
-    res.unwrap().item.unwrap()["config"]
+            });
+    res.sync().unwrap().item.unwrap()["config"]
         .s
         .as_ref()
         .unwrap()
@@ -188,18 +190,18 @@ fn index() -> Template {
 }
 
 #[get("/<hash_string>")]
-async fn hash(hash_string: String) -> Template {
-    render_page(read_yaml(hash_string).await)
+fn hash(hash_string: String) -> Template {
+    render_page(read_yaml(hash_string))
 }
 
 #[get("/q/<hash_string>?<q>")]
-async fn query(hash_string: String, q: String) -> Redirect {
-    let yaml_string = read_yaml(hash_string.clone()).await;
+fn query(hash_string: String, q: String) -> Redirect {
+    let yaml_string = read_yaml(hash_string.clone());
     let rules = parse_yaml(yaml_string);
 
     let cap_two = TWO_MATCH.captures(&q);
-    let mut zero = "";
-    let mut one = "";
+    let zero = "";
+    let one = "";
 
     // match &cap_two {
     //     Some(c) => {
@@ -247,8 +249,8 @@ async fn query(hash_string: String, q: String) -> Redirect {
 }
 
 #[get("/favicon.ico")]
-async fn favicon() -> Option<NamedFile> {
-    NamedFile::open("assets/favicon.ico").await.ok()
+fn favicon() -> Option<NamedFile> {
+    NamedFile::open("assets/favicon.ico").ok()
 }
 
 #[derive(Deserialize)]
@@ -257,7 +259,7 @@ struct SaveInput {
 }
 
 #[post("/save", format = "application/json", data = "<yaml>")]
-async fn save(yaml: Json<SaveInput>) -> String {
+fn save(yaml: Json<SaveInput>) -> String {
     // validate the yaml
     YamlLoader::load_from_str(&yaml.value).unwrap();
     let client = DynamoDbClient::new(Region::EuWest2);
@@ -271,22 +273,14 @@ async fn save(yaml: Json<SaveInput>) -> String {
                     "config".to_string() => AttributeValue { s: Some(yaml.value.clone()), ..Default::default()  },
                 },
                 ..Default::default()
-            })
-            .await;
+            }).sync();
     hash
 }
 
-#[tokio::main]
-async fn main() {
+pub fn rocket() -> Rocket {
     rocket::ignite()
         .attach(Template::fairing())
-        .mount(
-            "/assets",
-            StaticFiles::from(concat!(env!("CARGO_MANIFEST_DIR"), "/assets")),
-        )
+        .mount("/assets", StaticFiles::from("assets"))
         // NOTE: the hash must be the last, since it's a catch all
         .mount("/", routes![favicon, save, index, query, hash])
-        .launch()
-        .await
-        .unwrap();
 }
