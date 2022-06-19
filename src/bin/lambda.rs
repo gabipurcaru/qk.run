@@ -1,6 +1,9 @@
 use qk_run;
-use rocket_lamb::RocketExt;
+use rocket;
+use lambda_web::{launch_rocket_on_lambda, LambdaError};
 
-fn main() {
-    qk_run::rocket().lambda().launch();
+#[rocket::main]
+async fn main() -> Result<(), LambdaError> {
+    launch_rocket_on_lambda(qk_run::rocket()).await?;
+    Ok(())
 }

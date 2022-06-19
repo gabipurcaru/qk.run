@@ -12,17 +12,15 @@ extern crate tokio;
 extern crate yaml_rust;
 
 use maplit::hashmap;
+use rocket::{Rocket, Build};
 use regex::Regex;
 use rocket::http::uri::Uri;
-use rocket::response::{NamedFile, Redirect};
-use rocket::Rocket;
-use rocket_contrib::json::Json;
-use rocket_contrib::serve::StaticFiles;
-use rocket_contrib::templates::Template;
-use rocket_lamb::RocketExt;
+use rocket::response::Redirect;
+use rocket::fs::{NamedFile, FileServer};
+use rocket::serde::{Deserialize, Serialize, json::Json};
+use rocket_dyn_templates::Template;
 use rusoto_core::Region;
 use rusoto_dynamodb::{AttributeValue, DynamoDb, DynamoDbClient, GetItemInput, PutItemInput};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::default::Default;
 use tokio::runtime::Runtime;
@@ -100,7 +98,7 @@ fn render_page(yaml: String) -> Template {
     Template::render("index", &default_context(yaml))
 }
 
-fn read_yaml(hash_string: String) -> String {
+async fn read_yaml(hash_string: String) -> String {
     let res = DYNAMO_CLIENT
             .get_item(GetItemInput {
                 table_name: "qkrun".to_string(),
@@ -109,7 +107,7 @@ fn read_yaml(hash_string: String) -> String {
                 },
                 ..Default::default()
             });
-    res.sync().unwrap().item.unwrap()["config"]
+    res.await.unwrap().item.unwrap()["config"]
         .s
         .as_ref()
         .unwrap()
@@ -190,13 +188,13 @@ fn index() -> Template {
 }
 
 #[get("/<hash_string>")]
-fn hash(hash_string: String) -> Template {
-    render_page(read_yaml(hash_string))
+async fn hash(hash_string: String) -> Template {
+    render_page(read_yaml(hash_string).await)
 }
 
 #[get("/q/<hash_string>?<q>")]
-fn query(hash_string: String, q: String) -> Redirect {
-    let yaml_string = read_yaml(hash_string.clone());
+async fn query(hash_string: String, q: String) -> Redirect {
+    let yaml_string = read_yaml(hash_string.clone()).await;
     let rules = parse_yaml(yaml_string);
 
     let cap_two = TWO_MATCH.captures(&q);
@@ -230,8 +228,8 @@ fn query(hash_string: String, q: String) -> Redirect {
 
     let mut q_replace = query;
 
-    let encoded = Uri::percent_encode(&q).into_owned();
-    let encoded_query = Uri::percent_encode(&query).into_owned();
+    let encoded = &q; //Uri::percent_encode(&q).into_owned();
+    let encoded_query = &query; //Uri::percent_encode(&query).into_owned();
     q_replace = &encoded;
 
     if rule.prefix != "default" {
@@ -249,17 +247,18 @@ fn query(hash_string: String, q: String) -> Redirect {
 }
 
 #[get("/favicon.ico")]
-fn favicon() -> Option<NamedFile> {
-    NamedFile::open("assets/favicon.ico").ok()
+async fn favicon() -> Option<NamedFile> {
+    NamedFile::open("assets/favicon.ico").await.ok()
 }
 
 #[derive(Deserialize)]
+#[serde(crate = "rocket::serde")]
 struct SaveInput {
     value: String,
 }
 
 #[post("/save", format = "application/json", data = "<yaml>")]
-fn save(yaml: Json<SaveInput>) -> String {
+async fn save(yaml: Json<SaveInput>) -> String {
     // validate the yaml
     YamlLoader::load_from_str(&yaml.value).unwrap();
     let client = DynamoDbClient::new(Region::EuWest2);
@@ -273,14 +272,14 @@ fn save(yaml: Json<SaveInput>) -> String {
                     "config".to_string() => AttributeValue { s: Some(yaml.value.clone()), ..Default::default()  },
                 },
                 ..Default::default()
-            }).sync();
+            }).await;
     hash
 }
 
-pub fn rocket() -> Rocket {
-    rocket::ignite()
+pub fn rocket() -> Rocket<Build> {
+    rocket::build()
         .attach(Template::fairing())
-        .mount("/assets", StaticFiles::from("assets"))
+        .mount("/assets", FileServer::from("assets"))
         // NOTE: the hash must be the last, since it's a catch all
         .mount("/", routes![favicon, save, index, query, hash])
 }

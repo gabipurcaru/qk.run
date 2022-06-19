@@ -1,5 +1,8 @@
+#[macro_use] extern crate rocket;
+
 use qk_run;
 
-fn main() {
-    qk_run::rocket().launch();
+#[launch]
+fn rocket() -> _ {
+    qk_run::rocket()
 }
